@@ -1,297 +1,220 @@
 import re
 import string
 import joblib
-import nltk
 import pandas as pd
 import streamlit as st
+import nltk
+
+from nltk.corpus import stopwords
+
 import plotly.express as px
 import matplotlib.pyplot as plt
-nltk.download("stopwords")
-nltk.download("vader_lexicon")
-from wordcloud import WordCloud
-from nltk.corpus import stopwords
-import os
-import subprocess
 
-# Download NLTK stopwords
+from wordcloud import WordCloud
+
 nltk.download("stopwords")
 
 STOPWORDS = set(stopwords.words("english"))
 
+st.set_page_config(
+    page_title="Twitter Sentiment Analysis",
+    page_icon="🐦",
+    layout="wide"
+)
 
 def clean_text(text):
-    """
-    Cleans user-entered text using the same logic as training.
-    """
+
     if pd.isna(text):
         return ""
 
     text = str(text).lower()
 
-    text = re.sub(r"http\S+|www\S+|https\S+", "", text)
+    text = re.sub(r"http\S+|www\S+", "", text)
     text = re.sub(r"@\w+", "", text)
     text = re.sub(r"#", "", text)
     text = re.sub(r"\d+", "", text)
-    text = text.translate(str.maketrans("", "", string.punctuation))
+
+    text = text.translate(
+        str.maketrans("", "", string.punctuation)
+    )
+
     text = re.sub(r"\s+", " ", text).strip()
 
     words = text.split()
-    words = [word for word in words if word not in STOPWORDS]
+
+    words = [
+        word
+        for word in words
+        if word not in STOPWORDS
+    ]
 
     return " ".join(words)
 
-
 @st.cache_resource
 def load_model():
-    model = joblib.load("models/sentiment_model.pkl")
-    vectorizer = joblib.load("models/tfidf_vectorizer.pkl")
-    return model, vectorizer
 
+    model = joblib.load(
+        "models/sentiment_model.pkl"
+    )
+
+    vectorizer = joblib.load(
+        "models/tfidf_vectorizer.pkl"
+    )
+
+    return model, vectorizer
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv("data/processed_twitter_sentiment.csv")
 
-    if "Timestamp" in df.columns:
-        df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
+    df = pd.read_csv(
+        "data/processed_twitter_sentiment.csv"
+    )
+
+    df["Timestamp"] = pd.to_datetime(
+        df["Timestamp"],
+        errors="coerce"
+    )
 
     return df
 
+def predict_sentiment(
+    text,
+    model,
+    vectorizer
+):
 
-def predict_sentiment(text, model, vectorizer):
-    cleaned_text = clean_text(text)
-    transformed_text = vectorizer.transform([cleaned_text])
-    prediction = model.predict(transformed_text)[0]
+    cleaned = clean_text(text)
+
+    vector = vectorizer.transform([cleaned])
+
+    prediction = model.predict(vector)[0]
+
     return prediction
 
-
 def main():
-    st.set_page_config(
-        page_title="Twitter Sentiment Analysis Dashboard",
-        page_icon="📊",
-        layout="wide"
-    )
 
-    st.title("Twitter Sentiment Analysis Dashboard")
+    st.title("🐦 Twitter Sentiment Analysis Dashboard")
+
     st.write(
-        "This dashboard analyzes public sentiment from Twitter data and displays "
-        "Positive, Negative, and Neutral tweet distribution."
+        """
+        Analyze public sentiment using Machine Learning.
+        This dashboard classifies tweets as
+        Positive, Negative or Neutral.
+        """
     )
 
-    if (
-        not os.path.exists("models/sentiment_model.pkl")
-        or not os.path.exists("models/tfidf_vectorizer.pkl")
-        or not os.path.exists("data/processed_twitter_sentiment.csv")
-    ):
-        st.warning("Model files not found. Training model...")
-    
-        subprocess.run(["python", "train_model.py"])
-    
     model, vectorizer = load_model()
+
     df = load_data()
 
-    # Sidebar filters
-    st.sidebar.header("Dashboard Filters")
+    st.sidebar.header("Filters")
 
-    sentiment_options = sorted(df["Sentiment"].dropna().unique().tolist())
+    sentiments = st.sidebar.multiselect(
 
-    selected_sentiments = st.sidebar.multiselect(
         "Select Sentiment",
-        options=sentiment_options,
-        default=sentiment_options
+
+        options=sorted(
+            df["Sentiment"].unique()
+        ),
+
+        default=sorted(
+            df["Sentiment"].unique()
+        )
     )
 
-    filtered_df = df[df["Sentiment"].isin(selected_sentiments)]
+    filtered = df[
+        df["Sentiment"].isin(sentiments)
+    ]
 
-    if "Timestamp" in filtered_df.columns and filtered_df["Timestamp"].notna().any():
-        min_date = filtered_df["Timestamp"].min().date()
-        max_date = filtered_df["Timestamp"].max().date()
+    total = len(filtered)
 
-        selected_date_range = st.sidebar.date_input(
-            "Select Date Range",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date
-        )
-
-        if len(selected_date_range) == 2:
-            start_date, end_date = selected_date_range
-
-            filtered_df = filtered_df[
-                (filtered_df["Timestamp"].dt.date >= start_date)
-                & (filtered_df["Timestamp"].dt.date <= end_date)
-            ]
-
-    # Main metrics
-    st.subheader("Overall Sentiment Summary")
-
-    total_tweets = len(filtered_df)
-
-    if total_tweets == 0:
-        st.warning("No tweets available for the selected filters.")
-        st.stop()
-
-    sentiment_counts = filtered_df["Sentiment"].value_counts()
-    sentiment_percentages = (
-        filtered_df["Sentiment"].value_counts(normalize=True) * 100
+    percentages = (
+        filtered["Sentiment"]
+        .value_counts(normalize=True)
+        * 100
     ).round(2)
 
-    positive_pct = sentiment_percentages.get("Positive", 0)
-    negative_pct = sentiment_percentages.get("Negative", 0)
-    neutral_pct = sentiment_percentages.get("Neutral", 0)
+    positive = percentages.get(
+        "Positive",
+        0
+    )
 
-    col1, col2, col3, col4 = st.columns(4)
+    negative = percentages.get(
+        "Negative",
+        0
+    )
 
-    col1.metric("Total Tweets", total_tweets)
-    col2.metric("Positive", f"{positive_pct}%")
-    col3.metric("Negative", f"{negative_pct}%")
-    col4.metric("Neutral", f"{neutral_pct}%")
+    neutral = percentages.get(
+        "Neutral",
+        0
+    )
 
-    # Sentiment distribution charts
-    st.subheader("Sentiment Distribution")
+    c1, c2, c3, c4 = st.columns(4)
 
-    chart_col1, chart_col2 = st.columns(2)
+    c1.metric(
+        "Total Tweets",
+        total
+    )
 
-    with chart_col1:
-        sentiment_bar = px.bar(
-            x=sentiment_counts.index,
-            y=sentiment_counts.values,
-            color=sentiment_counts.index,
-            labels={"x": "Sentiment", "y": "Number of Tweets"},
-            title="Tweet Count by Sentiment"
-        )
+    c2.metric(
+        "Positive",
+        f"{positive}%"
+    )
 
-        st.plotly_chart(sentiment_bar, use_container_width=True)
+    c3.metric(
+        "Negative",
+        f"{negative}%"
+    )
 
-    with chart_col2:
-        sentiment_pie = px.pie(
-            names=sentiment_counts.index,
-            values=sentiment_counts.values,
-            title="Sentiment Percentage"
-        )
+    c4.metric(
+        "Neutral",
+        f"{neutral}%"
+    )
 
-        st.plotly_chart(sentiment_pie, use_container_width=True)
+    st.subheader(
+        "Sentiment Distribution"
+    )
 
-    # Engagement analysis
-    st.subheader("Engagement Analysis by Sentiment")
+    left, right = st.columns(2)
 
-    engagement_columns = []
-
-    if "Likes" in filtered_df.columns:
-        engagement_columns.append("Likes")
-
-    if "Retweets" in filtered_df.columns:
-        engagement_columns.append("Retweets")
-
-    if engagement_columns:
-        engagement_summary = (
-            filtered_df.groupby("Sentiment")[engagement_columns]
-            .mean()
-            .round(2)
-            .reset_index()
-        )
-
-        st.dataframe(engagement_summary, use_container_width=True)
-
-        for column in engagement_columns:
-            fig = px.bar(
-                engagement_summary,
-                x="Sentiment",
-                y=column,
-                color="Sentiment",
-                title=f"Average {column} by Sentiment"
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
-
-    # Sentiment over time
-    if "Timestamp" in filtered_df.columns and filtered_df["Timestamp"].notna().any():
-        st.subheader("Sentiment Trend Over Time")
-
-        trend_df = (
-            filtered_df.dropna(subset=["Timestamp"])
-            .groupby([filtered_df["Timestamp"].dt.date, "Sentiment"])
-            .size()
-            .reset_index(name="Count")
-        )
-
-        trend_df.rename(columns={"Timestamp": "Date"}, inplace=True)
-
-        trend_chart = px.line(
-            trend_df,
-            x="Date",
-            y="Count",
-            color="Sentiment",
-            markers=True,
-            title="Sentiment Trend Over Time"
-        )
-
-        st.plotly_chart(trend_chart, use_container_width=True)
-
-    # Word cloud
-    st.subheader("Most Common Words")
-
-    all_words = " ".join(filtered_df["Clean_Text"].dropna().astype(str))
-
-    if all_words.strip():
-        wordcloud = WordCloud(
-            width=1000,
-            height=400,
-            background_color="white",
-            colormap="viridis"
-        ).generate(all_words)
-
-        fig, ax = plt.subplots(figsize=(12, 5))
-        ax.imshow(wordcloud, interpolation="bilinear")
-        ax.axis("off")
-
-        st.pyplot(fig)
-    else:
-        st.info("Not enough text available to generate word cloud.")
-
-    # Data table
-    st.subheader("Tweet Data Preview")
-
-    preview_columns = [
-        "Tweet_ID",
-        "Username",
-        "Text",
-        "Retweets",
-        "Likes",
-        "Timestamp",
+    counts = filtered[
         "Sentiment"
-    ]
+    ].value_counts()
 
-    available_preview_columns = [
-        col for col in preview_columns if col in filtered_df.columns
-    ]
+    with left:
 
-    st.dataframe(
-        filtered_df[available_preview_columns].head(100),
-        use_container_width=True
-    )
+        fig = px.bar(
 
-    # Custom prediction
-    st.subheader("Predict Sentiment for a New Tweet")
+            x=counts.index,
 
-    user_tweet = st.text_area(
-        "Enter a tweet or review text:",
-        placeholder="Example: I really love this product. It works perfectly!"
-    )
+            y=counts.values,
 
-    if st.button("Predict Sentiment"):
-        if user_tweet.strip() == "":
-            st.warning("Please enter some text first.")
-        else:
-            prediction = predict_sentiment(user_tweet, model, vectorizer)
+            color=counts.index,
 
-            if prediction == "Positive":
-                st.success(f"Predicted Sentiment: {prediction}")
-            elif prediction == "Negative":
-                st.error(f"Predicted Sentiment: {prediction}")
-            else:
-                st.info(f"Predicted Sentiment: {prediction}")
+            labels={
+                "x":"Sentiment",
+                "y":"Tweets"
+            }
 
+        )
 
-if __name__ == "__main__":
-    main()
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
+
+    with right:
+
+        fig = px.pie(
+
+            names=counts.index,
+
+            values=counts.values
+
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
+
