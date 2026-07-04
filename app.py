@@ -10,7 +10,8 @@ nltk.download("stopwords")
 nltk.download("vader_lexicon")
 from wordcloud import WordCloud
 from nltk.corpus import stopwords
-
+import os
+import subprocess
 
 # Download NLTK stopwords
 nltk.download("stopwords")
@@ -77,14 +78,17 @@ def main():
         "Positive, Negative, and Neutral tweet distribution."
     )
 
-    try:
-        model, vectorizer = load_model()
-        df = load_data()
-    except FileNotFoundError:
-        st.error(
-            "Model or processed data not found. Please run `python train_model.py` first."
-        )
-        st.stop()
+    if (
+        not os.path.exists("models/sentiment_model.pkl")
+        or not os.path.exists("models/tfidf_vectorizer.pkl")
+        or not os.path.exists("data/processed_twitter_sentiment.csv")
+    ):
+        st.warning("Model files not found. Training model...")
+    
+        subprocess.run(["python", "train_model.py"])
+    
+    model, vectorizer = load_model()
+    df = load_data()
 
     # Sidebar filters
     st.sidebar.header("Dashboard Filters")
