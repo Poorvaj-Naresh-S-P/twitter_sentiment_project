@@ -15,6 +15,14 @@ from wordcloud import WordCloud
 nltk.download("stopwords")
 
 STOPWORDS = set(stopwords.words("english"))
+XQUIK_TEXT_COLUMNS = [
+    "text",
+    "tweet_text",
+    "full_text",
+    "content",
+    "Text",
+    "Tweet",
+]
 
 st.set_page_config(
     page_title="Twitter Sentiment Analysis",
@@ -91,6 +99,53 @@ def predict_sentiment(
 
     return prediction
 
+def find_text_column(df):
+
+    for column in XQUIK_TEXT_COLUMNS:
+        if column in df.columns:
+            return column
+
+    return None
+
+def read_xquik_export(uploaded_file):
+
+    name = uploaded_file.name.lower()
+
+    if name.endswith(".csv"):
+        return pd.read_csv(uploaded_file)
+
+    if name.endswith(".jsonl"):
+        return pd.read_json(uploaded_file, lines=True)
+
+    return pd.read_json(uploaded_file)
+
+def predict_export_rows(
+    df,
+    model,
+    vectorizer
+):
+
+    text_column = find_text_column(df)
+
+    if text_column is None:
+        raise ValueError(
+            "Upload a Xquik export with text, tweet_text, full_text, or content."
+        )
+
+    predicted = df.copy()
+    predicted["Text"] = predicted[text_column].fillna("").astype(str)
+    predicted["Clean_Text"] = predicted["Text"].apply(clean_text)
+    predicted = predicted[predicted["Clean_Text"] != ""]
+
+    if predicted.empty:
+        raise ValueError("The Xquik export does not contain readable tweet text.")
+
+    predicted["Sentiment"] = predicted["Text"].apply(
+        lambda text: predict_sentiment(text, model, vectorizer)
+    )
+
+    return predicted
+
 def main():
 
     st.title("🐦 Twitter Sentiment Analysis Dashboard")
@@ -106,6 +161,25 @@ def main():
     model, vectorizer = load_model()
 
     df = load_data()
+
+    uploaded_file = st.sidebar.file_uploader(
+        "Xquik export",
+        type=["csv", "json", "jsonl"]
+    )
+
+    source_label = "Sample dataset"
+
+    if uploaded_file is not None:
+        try:
+            df = predict_export_rows(
+                read_xquik_export(uploaded_file),
+                model,
+                vectorizer
+            )
+            source_label = "Xquik export"
+        except ValueError as error:
+            st.error(str(error))
+            return
 
     st.sidebar.header("Filters")
 
@@ -125,6 +199,8 @@ def main():
     filtered = df[
         df["Sentiment"].isin(sentiments)
     ]
+
+    st.caption(f"Data source: {source_label}")
 
     total = len(filtered)
 
@@ -217,6 +293,24 @@ def main():
             fig,
             use_container_width=True
         )
+
+    st.subheader("Analyze One Tweet")
+
+    tweet_text = st.text_area(
+        "Tweet text",
+        placeholder="Paste tweet text..."
+    )
+
+    if st.button("Predict Sentiment"):
+        if not tweet_text.strip():
+            st.warning("Enter tweet text first.")
+        else:
+            prediction = predict_sentiment(
+                tweet_text,
+                model,
+                vectorizer
+            )
+            st.success(f"Predicted sentiment: {prediction}")
 if __name__ == "__main__":
         main()
 
